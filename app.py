@@ -568,7 +568,7 @@ with right_col:
         </div>
         """, unsafe_allow_html=True)
 
-        all_danger = list({{r["road_name"] for r in high_cong + high_risk}})
+        all_danger = list({r["road_name"] for r in high_cong + high_risk})
         if all_danger:
             road_rows = "".join(f'<div class="alert-road">▸ {r}</div>' for r in all_danger)
             st.markdown(f"""
