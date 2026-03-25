@@ -5,3 +5,5 @@ imbalanced-learn
 pandas
 numpy
 folium
+matplotlib
+seaborn

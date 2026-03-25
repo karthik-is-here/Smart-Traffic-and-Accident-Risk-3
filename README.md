@@ -34,7 +34,10 @@ kochi_traffic/
 ├── predictor.py                    # Runs both ML models across all roads in an area
 ├── maps.py                         # Folium map generation (congestion + risk)
 ├── requirements.txt                # Python dependencies
-├── models/                         # Place trained .pkl files here after training
+├── generate_dataset.py             # Generates the synthetic training CSV
+├── augment_weather.py              # Pads real data with synthetic rain/fog rows
+├── train.py                        # Trains both ML models, saves to models/ folder
+├── models/                         # Trained .pkl files (created by train.py)
 │   ├── congestion_model.pkl
 │   ├── accident_risk_model.pkl
 │   ├── label_encoders.pkl
@@ -42,7 +45,7 @@ kochi_traffic/
 │   ├── risk_feature_columns.pkl
 │   └── class_orders.pkl
 ├── kochi_traffic_synthetic_v2.csv  # Synthetic training dataset (38,304 rows)
-└── kochi_traffic_ml_v2.ipynb       # Google Colab training notebook
+└── kochi_traffic_ml_v2.ipynb       # Legacy Google Colab notebook (optional)
 ```
 
 ---
@@ -151,15 +154,49 @@ streamlit run app.py
 
 ## Swapping to Real Data (Phase 2)
 
-When real data collection is complete:
+When real data collection is complete, follow these steps:
 
-1. Download the collected CSV from the GitHub repository
-2. Open `kochi_traffic_ml_v2.ipynb` in Colab
-3. Upload the real CSV instead of the synthetic one at Cell 2
-4. Retrain all cells — the notebook handles the same schema automatically
-5. Download the new `kochi_traffic_models_v2.zip`
-6. Replace the contents of the `models/` folder
-7. Restart the dashboard — no other changes needed
+### Step 1 — Check your weather coverage
+
+Run `python status.py` on the phone and check the weather breakdown. If any of Light Rain, Heavy Rain, or Fog is below ~8% of total rows, proceed to Step 2. If coverage looks good, skip to Step 3.
+
+### Step 2 — Augment with rain/fog rows (if needed)
+
+Real data collected during dry spells will be underrepresented in rain/fog conditions. Use `augment_weather.py` to pad the dataset:
+
+```bash
+# Download kochi_traffic_real.csv from GitHub first, then:
+python augment_weather.py --real kochi_traffic_real.csv --out kochi_traffic_augmented.csv
+```
+
+This generates synthetic rain/fog rows so each weather condition reaches at least 8% of the total. Real rows keep `data_source = "real"`, synthetic rows are tagged `data_source = "synthetic"`.
+
+Options:
+- `--target 10` — raise the target percentage (default: 8)
+- `--seed 42` — set random seed for reproducibility
+
+### Step 3 — Retrain locally
+
+```bash
+# With augmented data (recommended):
+python train.py --data kochi_traffic_augmented.csv
+
+# With raw real data (if weather coverage is good):
+python train.py --data kochi_traffic_real.csv
+
+# Skip EDA/confusion matrix plots if you just want speed:
+python train.py --data kochi_traffic_augmented.csv --no-plots
+```
+
+Models are saved directly into `models/` — no downloading or file moving needed.
+
+### Step 4 — Restart the dashboard
+
+```bash
+streamlit run app.py
+```
+
+`train.py` saves directly into `models/` — no file moving or extraction needed. Just restart the dashboard.
 
 ---
 
