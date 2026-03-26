@@ -8,7 +8,7 @@ A machine learning dashboard predicting real-time traffic congestion and acciden
 
 Kochi Traffic Intelligence is an end-to-end ML project that models urban traffic behaviour across Kochi's major road network. The system takes user inputs — area, day of week, hour, and weather condition — and runs two trained XGBoost classifiers to predict the **congestion level** and **accident risk level** for every road in the selected area. Results are visualised on an interactive dark-map overlay with colour-coded markers, a sortable road table, and a live weather and risk summary panel.
 
-The project is designed in two phases. The current version runs on a synthetic dataset that mirrors the schema of real TomTom Traffic API and OpenWeatherMap data. The second phase replaces the synthetic data with real collected data — requiring only a model retrain with no changes to the dashboard or pipeline.
+Real traffic data is collected every 30 minutes via an Android phone running Termux, querying the TomTom Traffic Flow API and OpenWeatherMap API, and auto-committing to a private GitHub repository. Because the real data was collected during a dry spell, rain and fog rows are supplemented using `augment_weather.py` before retraining.
 
 ---
 
@@ -33,28 +33,23 @@ kochi_traffic/
 ├── data_utils.py                   # Feature engineering and model loading
 ├── predictor.py                    # Runs both ML models across all roads in an area
 ├── maps.py                         # Folium map generation (congestion + risk)
-├── requirements.txt                # Python dependencies
+├── train.py                        # Trains both ML models, saves to models/ folder
 ├── generate_dataset.py             # Generates the synthetic training CSV
 ├── augment_weather.py              # Pads real data with synthetic rain/fog rows
-├── train.py                        # Trains both ML models, saves to models/ folder
-├── models/                         # Trained .pkl files (created by train.py)
-│   ├── congestion_model.pkl
-│   ├── accident_risk_model.pkl
-│   ├── label_encoders.pkl
-│   ├── feature_columns.pkl
-│   ├── risk_feature_columns.pkl
-│   └── class_orders.pkl
-├── kochi_traffic_synthetic_v2.csv  # Synthetic training dataset (38,304 rows)
-└── kochi_traffic_ml_v2.ipynb       # Legacy Google Colab notebook (optional)
+├── requirements.txt                # Python dependencies
+├── README.md                       # This file
+└── models/                         # Trained .pkl files (created by train.py)
+    ├── congestion_model.pkl
+    ├── accident_risk_model.pkl
+    ├── label_encoders.pkl
+    ├── feature_columns.pkl
+    ├── risk_feature_columns.pkl
+    └── class_orders.pkl
 ```
 
 ---
 
-## Dataset
-
-The synthetic dataset (`kochi_traffic_synthetic_v2.csv`) contains **38,304 rows** across 14 days, sampled every 30 minutes for all 58 roads. It is designed to exactly match the schema of real data collected via the TomTom Traffic Flow API and OpenWeatherMap API.
-
-### Schema (27 columns)
+## Dataset Schema (27 columns)
 
 | Column | Description |
 |--------|-------------|
@@ -86,63 +81,68 @@ The synthetic dataset (`kochi_traffic_synthetic_v2.csv`) contains **38,304 rows*
 | `data_source` | `synthetic` or `real` |
 | `tomtom_confidence` | TomTom confidence score (0.75–1.0) |
 
-### Weather distribution (Kerala-weighted)
-- Clear: 28% — Cloudy: 22% — Light Rain: 25% — Heavy Rain: 15% — Fog: 10%
-
 ### Congestion derivation
 ```
 congestion_score = 1 - (current_speed / free_flow_speed)
 ```
 
 ### Accident risk derivation
-Accident risk is a **modelled estimate** — not recorded accident data. It is derived from congestion severity, weather condition multiplier, speed deviation above the posted limit, and a night-time bonus. This is consistent with standard traffic safety modelling practice where risk is inferred from observable road conditions rather than waiting for incidents to occur.
+Accident risk is a **modelled estimate** — not recorded accident data. It is derived from congestion severity, weather condition multiplier, speed deviation above the posted limit, and a night-time bonus.
 
 ---
 
 ## ML Models
 
-Both models are trained in `kochi_traffic_ml_v2.ipynb` using **XGBoost** multi-class classification.
+Both models are trained using `train.py` with **XGBoost** multi-class classification.
 
 ### Congestion Model
-- **Target:** `congestion_level` (4 classes)
-- **Features:** 23 features including cyclic hour/day encoding, speed ratio, road type, weather condition, rainfall, visibility, temperature, humidity, and location encodings
-- **Training:** 80/20 train-test split, stratified
+- **Target:** `congestion_level` (4 classes: Low / Moderate / High / Very High)
+- **Features:** 23 features including cyclic hour/day encoding, speed ratio, road type, weather variables, and location encodings
+- **Training:** 80/20 stratified split
 
 ### Accident Risk Model
 - **Target:** `accident_risk_level` (4 classes)
-- **Features:** Same 23 features plus `congestion_score` and `congestion_level_enc`
+- **Features:** Same 23 features plus `congestion_score` and `congestion_level_enc` (25 total)
 - **Class balancing:** SMOTE oversampling applied to minority classes
 - **Training:** 80/20 split
 
 ### Feature engineering
-- **Cyclic encoding** — hour and day encoded as sin/cos pairs to preserve circular continuity (e.g. 23:00 is close to 00:00)
+- **Cyclic encoding** — hour and day encoded as sin/cos pairs (e.g. 23:00 is adjacent to 00:00)
 - **Speed ratio** — `current_speed / free_flow_speed`, captures deviation from normal flow
-- **Label encoding** — area, road name, road type, weather condition encoded with sklearn LabelEncoder; encoders saved for inference
+- **Label encoding** — categoricals encoded with sklearn LabelEncoder; encoders saved for inference
 
 ---
 
 ## Setup & Running
 
-### 1. Train the models (Google Colab)
-
-1. Open `kochi_traffic_ml_v2.ipynb` in [Google Colab](https://colab.research.google.com)
-2. Run **Cell 1** to install dependencies
-3. Run **Cell 2** — a file picker will appear, upload `kochi_traffic_synthetic_v2.csv`
-4. Run all remaining cells in order
-5. Run the final cell to download `kochi_traffic_models_v2.zip`
-6. Extract the zip — you will get 6 `.pkl` files
-
-### 2. Set up the dashboard
+### 1. Install dependencies
 
 ```bash
-# Clone or download the project files
-# Place the 6 .pkl files into a models/ folder
-
 pip install -r requirements.txt
+```
+
+### 2. Train the models
+
+```bash
+# On the synthetic dataset (first time / no real data yet):
+python train.py
+
+# On real + augmented data:
+python train.py --data kochi_traffic_augmented.csv
+
+# Skip plots for faster training:
+python train.py --data kochi_traffic_augmented.csv --no-plots
+```
+
+Models are saved directly into `models/`.
+
+### 3. Run the dashboard
+
+```bash
 streamlit run app.py
 ```
 
-### 3. Using the dashboard
+### 4. Using the dashboard
 
 - Select **Day**, **Hour**, **Weather**, and **Location** from the sidebar
 - Click **⚡ ANALYSE TRAFFIC**
@@ -152,51 +152,43 @@ streamlit run app.py
 
 ---
 
-## Swapping to Real Data (Phase 2)
+## Real Data Pipeline
 
-When real data collection is complete, follow these steps:
+Real traffic data is collected every 30 minutes by a separate collector running on an Android phone via Termux. The collector lives in a separate private repository (`kochi-traffic-data`) and contains:
 
-### Step 1 — Check your weather coverage
+- `collect.py` — queries TomTom for 57 roads + OpenWeatherMap for weather, derives all 27 columns, appends to CSV, commits and pushes to GitHub
+- `run_scheduler.py` — runs `collect()` every 30 minutes inside a GNU Screen session with `termux-wake-lock`
+- `status.py` — shows total rows, days collected, weather and congestion breakdowns, and data source split
 
-Run `python status.py` on the phone and check the weather breakdown. If any of Light Rain, Heavy Rain, or Fog is below ~8% of total rows, proceed to Step 2. If coverage looks good, skip to Step 3.
+**APIs used:**
+- TomTom Traffic Flow API — current speed, free-flow speed, confidence score per road
+- OpenWeatherMap API — rainfall, visibility, temperature, humidity for Kochi city centre
 
-### Step 2 — Augment with rain/fog rows (if needed)
+---
 
-Real data collected during dry spells will be underrepresented in rain/fog conditions. Use `augment_weather.py` to pad the dataset:
+## Weather Augmentation
+
+Because the real data was collected during an unusually dry March period (72.9% Cloudy, 26.4% Clear, 0.6% Light Rain, 0% Heavy Rain or Fog), the dataset needs rain and fog rows added before retraining. This is done using `augment_weather.py`:
 
 ```bash
-# Download kochi_traffic_real.csv from GitHub first, then:
 python augment_weather.py --real kochi_traffic_real.csv --out kochi_traffic_augmented.csv
 ```
 
-This generates synthetic rain/fog rows so each weather condition reaches at least 8% of the total. Real rows keep `data_source = "real"`, synthetic rows are tagged `data_source = "synthetic"`.
+This generates synthetic Light Rain, Heavy Rain, and Fog rows until each condition reaches at least 8% of the total dataset. Real rows keep `data_source = "real"`, synthetic rows are tagged `data_source = "synthetic"`.
 
-Options:
-- `--target 10` — raise the target percentage (default: 8)
-- `--seed 42` — set random seed for reproducibility
+---
 
-### Step 3 — Retrain locally
+## Retraining Workflow
 
 ```bash
-# With augmented data (recommended):
+# 1. Download kochi_traffic_real.csv from the collector GitHub repo
+# 2. Augment rain/fog coverage
+python augment_weather.py --real kochi_traffic_real.csv --out kochi_traffic_augmented.csv
+# 3. Retrain
 python train.py --data kochi_traffic_augmented.csv
-
-# With raw real data (if weather coverage is good):
-python train.py --data kochi_traffic_real.csv
-
-# Skip EDA/confusion matrix plots if you just want speed:
-python train.py --data kochi_traffic_augmented.csv --no-plots
-```
-
-Models are saved directly into `models/` — no downloading or file moving needed.
-
-### Step 4 — Restart the dashboard
-
-```bash
+# 4. Restart dashboard — models/ is already updated
 streamlit run app.py
 ```
-
-`train.py` saves directly into `models/` — no file moving or extraction needed. Just restart the dashboard.
 
 ---
 
@@ -221,15 +213,17 @@ streamlit run app.py
 | Dashboard | Streamlit |
 | ML Models | XGBoost, scikit-learn, imbalanced-learn |
 | Maps | Folium (CartoDB tiles) |
-| Data | Pandas, NumPy |
-| Training | Google Colab |
+| Data processing | Pandas, NumPy |
+| Visualisation | Matplotlib, Seaborn |
 | Real data collection | TomTom Traffic Flow API, OpenWeatherMap API |
+| Mobile collection | Termux (Android), GNU Screen |
+| Data storage | GitHub (private repository) |
 
 ---
 
 ## Limitations
 
 - **Accident risk is modelled, not recorded** — the system estimates relative risk from traffic and weather inputs. It does not use historical accident records.
-- **Synthetic data** — the current version is trained on generated data. Predictions will improve significantly once real collected data is used for training.
+- **Weather augmentation** — rain and fog rows in the training data are partially synthetic due to dry collection conditions. This is standard data augmentation practice and is clearly tagged via the `data_source` column.
 - **Static inference** — predictions are based on the selected inputs, not a live feed. The dashboard does not auto-refresh.
 - **Road coordinates** — major junctions are verified against OpenStreetMap. Smaller local roads are approximate and may be offset by up to 100–200 metres.
